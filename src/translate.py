@@ -1,35 +1,56 @@
 from transformers import MarianMTModel, MarianTokenizer
+from transformers import NllbTokenizer, AutoModelForSeq2SeqLM
 import torch
-
-# Model name (English → Hindi)
-model_name = "Helsinki-NLP/opus-mt-en-hi"
-
-# Load tokenizer and model
-tokenizer = MarianTokenizer.from_pretrained(model_name)
-model = MarianMTModel.from_pretrained(model_name)
-
-# Use GPU if available
+import sys
+sys.stdout.reconfigure(encoding='utf-8')
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-model = model.to(device)
+
+loaded_models = {}
+
+# Hindi (Marian)
+hi_model_name = "Helsinki-NLP/opus-mt-en-hi"
+hi_tokenizer = MarianTokenizer.from_pretrained(hi_model_name)
+hi_model = MarianMTModel.from_pretrained(hi_model_name).to(device)
+loaded_models["hindi"] = ("marian", hi_tokenizer, hi_model)
+
+# Kannada (NLLB)
+kn_model_name = "facebook/nllb-200-distilled-600M"
+kn_tokenizer = NllbTokenizer.from_pretrained(kn_model_name)
+kn_model = AutoModelForSeq2SeqLM.from_pretrained(kn_model_name).to(device)
+loaded_models["kannada"] = ("nllb", kn_tokenizer, kn_model)
 
 # Translation function
-def translate(texts):
-    inputs = tokenizer(texts, return_tensors="pt", padding=True, truncation=True).to(device)
-    translated = model.generate(**inputs)
-    return tokenizer.batch_decode(translated, skip_special_tokens=True)
+def translate(text, target_lang):
+    model_type, tokenizer, model = loaded_models[target_lang]
 
-# Test sentences
-sentences = [
-    "Hello, how are you?",
-    "I am learning machine learning.",
-    "Transformers are very powerful."
-]
+    if model_type == "marian":
+        inputs = tokenizer([text], return_tensors="pt", padding=True).to(device)
+        output = model.generate(**inputs)
+        return tokenizer.decode(output[0], skip_special_tokens=True)
 
-# Run translation
-results = translate(sentences)
+    elif model_type == "nllb":
+        inputs = tokenizer(text, return_tensors="pt").to(device)
+        output = model.generate(
+            **inputs,
+            forced_bos_token_id=tokenizer.convert_tokens_to_ids("kan_Knda")
+        )
+        return tokenizer.decode(output[0], skip_special_tokens=True)
 
-# Print results
-for en, hi in zip(sentences, results):
-    print(f"EN: {en}")
-    print(f"HI: {hi}")
-    print("-" * 50)
+    return "Translation error"
+# Input
+while True:
+    text = input("\nEnter English text (type 'exit' to quit): ")
+
+    if text.lower() == "exit":
+        print("Exiting... 👋")
+        break
+
+    lang = input("Choose language (hindi/kannada): ").lower()
+
+    # 🔥 YAHI PAR validation
+    if lang not in loaded_models:
+        print("Invalid language. Try again.")
+        continue
+
+    result = translate(text, lang)
+    print("Translated:", result)
